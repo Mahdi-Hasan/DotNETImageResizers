@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "DotNETImageResizer": {
+      "commandName": "Project"
+    },
+    "Container (Dockerfile)": {
+      "commandName": "Docker"
+    }
+  }
+}
