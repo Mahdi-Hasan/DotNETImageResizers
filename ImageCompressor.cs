@@ -62,7 +62,7 @@ public class ImageCompressor
             "png" => new PngEncoder { CompressionLevel = PngCompressionLevel.Level5 },
             "bmp" => new BmpEncoder(),
             "webp" => new WebpEncoder { Quality = Quality },
-            _ => throw new ArgumentException($"Unsupported format: {format}")
+            _ => throw new ArgumentException($"Unsupported format Image Sharp: {format}")
         };
 
         await image.SaveAsync(outputPath, encoder);
@@ -99,13 +99,13 @@ public class ImageCompressor
 
         // Optimize compression based on file type
         var extension = Path.GetExtension(inputPath).ToLower();
-        image.Format = extension switch
+        image.Format = format switch
         {
-            ".jpeg" or ".jpg" => MagickFormat.Jpeg,
-            ".png" => MagickFormat.Png,
-            ".webp" => MagickFormat.WebP,
-            ".bmp" => MagickFormat.Bmp,
-            _ => throw new NotSupportedException($"Unsupported image format: {extension}")
+            "jpeg" or "jpg" => MagickFormat.Jpeg,
+            "png" => MagickFormat.Png,
+            "webp" => MagickFormat.WebP,
+            "bmp" => MagickFormat.Bmp,
+            _ => throw new NotSupportedException($"Unsupported image format Magic: {extension}")
         };
         image.Strip();
         await image.WriteAsync(outputPath);
@@ -130,35 +130,33 @@ public class ImageCompressor
         var stopwatch = Stopwatch.StartNew();
         var initialMemory = GC.GetTotalMemory(true);
         var inputFileInfo = new FileInfo(inputPath);
-
-        await using var originalStream = File.OpenRead(inputPath);
-        using var originalBitmap = SKBitmap.Decode(originalStream);
         SKEncodedImageFormat encodedFormat = format.ToLower() switch
         {
-            ".jpg" or ".jpeg" => SKEncodedImageFormat.Jpeg,
-            ".png" => SKEncodedImageFormat.Png,
-            ".webp" => SKEncodedImageFormat.Webp,
-            ".bmp" => SKEncodedImageFormat.Bmp,
-            _ => throw new ArgumentException($"Unsupported output file format: {format}")
+            "jpg" or "jpeg" => SKEncodedImageFormat.Jpeg,
+            "png" => SKEncodedImageFormat.Png,
+            "webp" => SKEncodedImageFormat.Webp,
+            "bmp" => SKEncodedImageFormat.Bmp,
+            _ => throw new ArgumentException($"Unsupported output file format Skia encode: {format}")
         };
-
-        var outputPath = Path.Combine(outputFilesPath, $"{Path.GetFileNameWithoutExtension(inputPath)}_skia{format}");
-
-        SKData encodedData;
-        using (var encodedImage = SKImage.FromBitmap(originalBitmap))
+        var outputPath = Path.Combine(outputFilesPath, $"{Path.GetFileNameWithoutExtension(inputPath)}_skia.{format}");
+        // Read the original image
+        byte[] imageData;
+        using (var originalBitmap = SKBitmap.Decode(inputPath))
         {
-            encodedData = encodedFormat switch
+            using (var encodedImage = SKImage.FromBitmap(originalBitmap))
             {
-                SKEncodedImageFormat.Jpeg => encodedImage.Encode(encodedFormat, Quality),
-                SKEncodedImageFormat.Png => encodedImage.Encode(encodedFormat, Quality),
-                SKEncodedImageFormat.Webp => encodedImage.Encode(encodedFormat, Quality),
-                SKEncodedImageFormat.Bmp => encodedImage.Encode(encodedFormat, 100),
-                _ => throw new ArgumentException($"Unsupported output file format: {format}")
-            };
+                using (var encodedData = encodedImage.Encode())
+                {
+                    imageData = encodedData.ToArray();
+                }
+            }
         }
 
-        await File.WriteAllBytesAsync(outputPath, encodedData.ToArray());
-
+        // Use FileStream with explicit file sharing
+        await using (var fileStream = new FileStream(outputPath, FileMode.Create, FileAccess.Write, FileShare.None))
+        {
+            await fileStream.WriteAsync(imageData, 0, imageData.Length);
+        }
         stopwatch.Stop();
         var outputFileInfo = new FileInfo(outputPath);
 
