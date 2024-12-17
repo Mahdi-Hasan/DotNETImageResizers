@@ -1,18 +1,18 @@
 ﻿using ImageMagick;
 using SixLabors.ImageSharp.Formats.Jpeg;
-using SkiaSharp;
 using System.Diagnostics;
 using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.Processing;
 using SixLabors.ImageSharp.Formats.Png;
 using SixLabors.ImageSharp.Formats.Webp;
 using SixLabors.ImageSharp.Formats;
 using SixLabors.ImageSharp.Formats.Bmp;
+using SkiaSharp;
+using System.Text;
 
 namespace DotNETImageResizer;
-
 public class ImageCompressor
 {
+    public readonly int Quality = 75;
     public async Task<CompressionResult[]> RunBenchmarksAsync(string inputFolderPath, string outputFilesPath, int expectedSize)
     {
         // Get all supported image files
@@ -40,7 +40,6 @@ public class ImageCompressor
             }
             catch (Exception ex)
             {
-                // Log the error or handle it appropriately
                 Console.WriteLine($"Error processing {inputFilePath}: {ex.Message}");
             }
         });
@@ -54,31 +53,21 @@ public class ImageCompressor
         var initialMemory = GC.GetTotalMemory(true);
         var inputFileInfo = new FileInfo(inputPath);
 
-        using var image = Image.Load(inputPath);
-
-        // Resize
-        image.Mutate(x => x.Resize(new ResizeOptions
-        {
-            Size = new SixLabors.ImageSharp.Size(targetSize, targetSize),
-            Mode = ResizeMode.Max
-        }));
+        using var image = await Image.LoadAsync(inputPath);
 
         var outputPath = $"{outputFilesPath}{Path.GetFileNameWithoutExtension(inputPath)}_ImageSharp.{format}";
-
-        // Define supported encoders based on the format
         IImageEncoder encoder = format.ToLower() switch
         {
-            "jpg" or "jpeg" => new JpegEncoder { Quality = 75 }, // JPEG Encoder
+            "jpg" or "jpeg" => new JpegEncoder { Quality = Quality },
             "png" => new PngEncoder { CompressionLevel = PngCompressionLevel.Level5 },
-            "bmp" => new BmpEncoder(), // BMP Encoder (default settings)
-            "webp" => new WebpEncoder { Quality = 75 },
+            "bmp" => new BmpEncoder(),
+            "webp" => new WebpEncoder { Quality = Quality },
             _ => throw new ArgumentException($"Unsupported format: {format}")
         };
 
-        // Save with appropriate encoder
         await image.SaveAsync(outputPath, encoder);
-
         stopwatch.Stop();
+
         var outputFileInfo = new FileInfo(outputPath);
 
         return new CompressionResult
@@ -96,19 +85,30 @@ public class ImageCompressor
 
     private async Task<CompressionResult> CompressWithMagickNet(string inputPath, int targetSize, string format, string outputFilesPath)
     {
-
         var stopwatch = Stopwatch.StartNew();
         var initialMemory = GC.GetTotalMemory(true);
         var inputFileInfo = new FileInfo(inputPath);
 
         using var image = new MagickImage(inputPath);
 
-        // Resize
-        image.Resize(new Percentage(targetSize));
         var outputPath = $"{outputFilesPath}{Path.GetFileNameWithoutExtension(inputPath)}_Magicknet.{format}";
-        image.Quality = 75;
-        await image.WriteAsync(outputPath);
+        image.Quality = (uint)Quality;
 
+        // More precise color depth handling
+        image.Depth = Math.Min(image.Depth, 8);
+
+        // Optimize compression based on file type
+        var extension = Path.GetExtension(inputPath).ToLower();
+        image.Format = extension switch
+        {
+            ".jpeg" or ".jpg" => MagickFormat.Jpeg,
+            ".png" => MagickFormat.Png,
+            ".webp" => MagickFormat.WebP,
+            ".bmp" => MagickFormat.Bmp,
+            _ => throw new NotSupportedException($"Unsupported image format: {extension}")
+        };
+        image.Strip();
+        await image.WriteAsync(outputPath);
         stopwatch.Stop();
         var outputFileInfo = new FileInfo(outputPath);
 
@@ -127,22 +127,37 @@ public class ImageCompressor
 
     private async Task<CompressionResult> CompressWithSkiaSharp(string inputPath, int targetSize, string format, string outputFilesPath)
     {
-
         var stopwatch = Stopwatch.StartNew();
         var initialMemory = GC.GetTotalMemory(true);
         var inputFileInfo = new FileInfo(inputPath);
 
-        using var originalBitmap = SKBitmap.Decode(inputPath);
-        var resizedBitmap = originalBitmap.Resize(
-            new SKImageInfo(targetSize, targetSize),
-            new SKSamplingOptions(SKFilterMode.Nearest)
-        );
+        await using var originalStream = File.OpenRead(inputPath);
+        using var originalBitmap = SKBitmap.Decode(originalStream);
+        SKEncodedImageFormat encodedFormat = format.ToLower() switch
+        {
+            ".jpg" or ".jpeg" => SKEncodedImageFormat.Jpeg,
+            ".png" => SKEncodedImageFormat.Png,
+            ".webp" => SKEncodedImageFormat.Webp,
+            ".bmp" => SKEncodedImageFormat.Bmp,
+            _ => throw new ArgumentException($"Unsupported output file format: {format}")
+        };
 
-        var outputPath = $"{outputFilesPath}{Path.GetFileNameWithoutExtension(inputPath)}_Skia.{format}";
+        var outputPath = Path.Combine(outputFilesPath, $"{Path.GetFileNameWithoutExtension(inputPath)}_skia{format}");
 
-        using var image = SKImage.FromBitmap(resizedBitmap);
-        using var data = image.Encode(SKEncodedImageFormat.Jpeg, 75);
-        await File.WriteAllBytesAsync(outputPath, data.ToArray());
+        SKData encodedData;
+        using (var encodedImage = SKImage.FromBitmap(originalBitmap))
+        {
+            encodedData = encodedFormat switch
+            {
+                SKEncodedImageFormat.Jpeg => encodedImage.Encode(encodedFormat, Quality),
+                SKEncodedImageFormat.Png => encodedImage.Encode(encodedFormat, Quality),
+                SKEncodedImageFormat.Webp => encodedImage.Encode(encodedFormat, Quality),
+                SKEncodedImageFormat.Bmp => encodedImage.Encode(encodedFormat, 100),
+                _ => throw new ArgumentException($"Unsupported output file format: {format}")
+            };
+        }
+
+        await File.WriteAllBytesAsync(outputPath, encodedData.ToArray());
 
         stopwatch.Stop();
         var outputFileInfo = new FileInfo(outputPath);
