@@ -7,16 +7,14 @@ using SixLabors.ImageSharp.Processing;
 using SixLabors.ImageSharp.Formats.Png;
 using SixLabors.ImageSharp.Formats.Webp;
 using SixLabors.ImageSharp.Formats;
+using System.Drawing;
 
 namespace DotNETImageResizer;
 
 
 public class ImageCompressor
 {
-    private static readonly int[] IMAGE_SIZES = new[] { 100, 500, 1000, 2000 };
-    private static readonly string[] IMAGE_FORMATS = new[] { "jpg", "png", "webp" };
-
-    public async Task<List<CompressionResult>> RunBenchmarksAsync(string inputFolderPath)
+    public List<CompressionResult> RunBenchmarksAsync(string inputFolderPath)
     {
         var results = new List<CompressionResult>();
 
@@ -25,142 +23,130 @@ public class ImageCompressor
         var imageFiles = Directory.GetFiles(inputFolderPath)
             .Where(file => supportedExtensions.Contains(Path.GetExtension(file).ToLower()))
             .ToList();
-
+        const int size = 512;
+        const string format = "jpg";
         foreach (var inputPath in imageFiles)
         {
-            foreach (var size in IMAGE_SIZES)
-            {
-                foreach (var format in IMAGE_FORMATS)
-                {
-                    results.Add(await CompressWithImageSharp(inputPath, size, format));
-                    results.Add(await CompressWithMagickNet(inputPath, size, format));
-                    results.Add(await CompressWithSkiaSharp(inputPath, size, format));
-                }
-            }
+            results.Add(CompressWithImageSharp(inputPath, size, format));
+            results.Add(CompressWithMagickNet(inputPath, size, format));
+            results.Add(CompressWithSkiaSharp(inputPath, size, format));
         }
 
         return results;
     }
 
-    private async Task<CompressionResult> CompressWithImageSharp(string inputPath, int targetSize, string format)
+    private CompressionResult CompressWithImageSharp(string inputPath, int targetSize, string format)
     {
-        return await Task.Run(() =>
+        var stopwatch = Stopwatch.StartNew();
+        var initialMemory = GC.GetTotalMemory(true);
+        var inputFileInfo = new FileInfo(inputPath);
+
+        using var image = SixLabors.ImageSharp.Image.Load(inputPath);
+
+        // Resize
+        image.Mutate(x => x.Resize(new ResizeOptions
         {
-            var stopwatch = Stopwatch.StartNew();
-            var initialMemory = GC.GetTotalMemory(true);
-            var inputFileInfo = new FileInfo(inputPath);
+            Size = new SixLabors.ImageSharp.Size(targetSize, targetSize),
+            Mode = ResizeMode.Max
+        }));
 
-            using var image = SixLabors.ImageSharp.Image.Load(inputPath);
+        // Compress with quality control
+        var outputPath = $"output_imagesharp_{Path.GetFileNameWithoutExtension(inputPath)}_{targetSize}.{format}";
 
-            // Resize
-            image.Mutate(x => x.Resize(new ResizeOptions
-            {
-                Size = new SixLabors.ImageSharp.Size(targetSize, targetSize),
-                Mode = ResizeMode.Max
-            }));
+        // Determine encoder based on format
+        IImageEncoder encoder = format switch
+        {
+            "jpg" => new JpegEncoder { Quality = 75 },
+            "png" => new PngEncoder { CompressionLevel = PngCompressionLevel.Level5 },
+            "webp" => new WebpEncoder { Quality = 75 },
+            _ => throw new ArgumentException($"Unsupported format: {format}")
+        };
 
-            // Compress with quality control
-            var outputPath = $"output_imagesharp_{Path.GetFileNameWithoutExtension(inputPath)}_{targetSize}.{format}";
+        // Save with appropriate encoder
+        image.Save(outputPath, encoder);
 
-            // Determine encoder based on format
-            IImageEncoder encoder = format switch
-            {
-                "jpg" => new JpegEncoder { Quality = 75 },
-                "png" => new PngEncoder { CompressionLevel = PngCompressionLevel.Level5 },
-                "webp" => new WebpEncoder { Quality = 75 },
-                _ => throw new ArgumentException($"Unsupported format: {format}")
-            };
+        stopwatch.Stop();
+        var outputFileInfo = new FileInfo(outputPath);
 
-            // Save with appropriate encoder
-            image.Save(outputPath, encoder);
-
-            stopwatch.Stop();
-            var outputFileInfo = new FileInfo(outputPath);
-
-            return new CompressionResult
-            {
-                FileName = Path.GetFileName(inputPath),
-                LibraryName = "ImageSharp",
-                TargetSize = targetSize,
-                Format = format,
-                CompressionTimeMs = stopwatch.ElapsedMilliseconds,
-                MemoryUsedBytes = GC.GetTotalMemory(true) - initialMemory,
-                InputFileSizeBytes = inputFileInfo.Length,
-                OutputFileSizeBytes = outputFileInfo.Length
-            };
-        });
+        return new CompressionResult
+        {
+            FileName = Path.GetFileName(inputPath),
+            LibraryName = "ImageSharp",
+            TargetSize = targetSize,
+            Format = format,
+            CompressionTimeMs = stopwatch.ElapsedMilliseconds,
+            MemoryUsedBytes = GC.GetTotalMemory(true) - initialMemory,
+            InputFileSizeBytes = inputFileInfo.Length,
+            OutputFileSizeBytes = outputFileInfo.Length
+        };
     }
 
-    private async Task<CompressionResult> CompressWithMagickNet(string inputPath, int targetSize, string format)
+    private CompressionResult CompressWithMagickNet(string inputPath, int targetSize, string format)
     {
-        return await Task.Run(() =>
+
+        var stopwatch = Stopwatch.StartNew();
+        var initialMemory = GC.GetTotalMemory(true);
+        var inputFileInfo = new FileInfo(inputPath);
+
+        using var image = new MagickImage(inputPath);
+
+        // Resize
+        image.Resize(new Percentage(targetSize));
+
+        // Compress
+        var outputPath = $"output_magicknet_{Path.GetFileNameWithoutExtension(inputPath)}_{targetSize}.{format}";
+        image.Quality = 75;
+        image.Write(outputPath);
+
+        stopwatch.Stop();
+        var outputFileInfo = new FileInfo(outputPath);
+
+        return new CompressionResult
         {
-            var stopwatch = Stopwatch.StartNew();
-            var initialMemory = GC.GetTotalMemory(true);
-            var inputFileInfo = new FileInfo(inputPath);
-
-            using var image = new MagickImage(inputPath);
-
-            // Resize
-            image.Resize(new Percentage(targetSize));
-
-            // Compress
-            var outputPath = $"output_magicknet_{Path.GetFileNameWithoutExtension(inputPath)}_{targetSize}.{format}";
-            image.Quality = 75;
-            image.Write(outputPath);
-
-            stopwatch.Stop();
-            var outputFileInfo = new FileInfo(outputPath);
-
-            return new CompressionResult
-            {
-                FileName = Path.GetFileName(inputPath),
-                LibraryName = "MagickNet",
-                TargetSize = targetSize,
-                Format = format,
-                CompressionTimeMs = stopwatch.ElapsedMilliseconds,
-                MemoryUsedBytes = GC.GetTotalMemory(true) - initialMemory,
-                InputFileSizeBytes = inputFileInfo.Length,
-                OutputFileSizeBytes = outputFileInfo.Length
-            };
-        });
+            FileName = Path.GetFileName(inputPath),
+            LibraryName = "MagickNet",
+            TargetSize = targetSize,
+            Format = format,
+            CompressionTimeMs = stopwatch.ElapsedMilliseconds,
+            MemoryUsedBytes = GC.GetTotalMemory(true) - initialMemory,
+            InputFileSizeBytes = inputFileInfo.Length,
+            OutputFileSizeBytes = outputFileInfo.Length
+        };
     }
 
-    private async Task<CompressionResult> CompressWithSkiaSharp(string inputPath, int targetSize, string format)
+    private CompressionResult CompressWithSkiaSharp(string inputPath, int targetSize, string format)
     {
-        return await Task.Run(() =>
+
+        var stopwatch = Stopwatch.StartNew();
+        var initialMemory = GC.GetTotalMemory(true);
+        var inputFileInfo = new FileInfo(inputPath);
+
+        using var originalBitmap = SKBitmap.Decode(inputPath);
+        var resizedBitmap = originalBitmap.Resize(
+            new SKImageInfo(targetSize, targetSize),
+            SKFilterQuality.Medium
+        );
+
+        var outputPath = $"output_skia_{Path.GetFileNameWithoutExtension(inputPath)}_{targetSize}.{format}";
+
+        using var image = SKImage.FromBitmap(resizedBitmap);
+        using var data = image.Encode(SKEncodedImageFormat.Jpeg, 75);
+        File.WriteAllBytes(outputPath, data.ToArray());
+
+        stopwatch.Stop();
+        var outputFileInfo = new FileInfo(outputPath);
+
+        return new CompressionResult
         {
-            var stopwatch = Stopwatch.StartNew();
-            var initialMemory = GC.GetTotalMemory(true);
-            var inputFileInfo = new FileInfo(inputPath);
-
-            using var originalBitmap = SKBitmap.Decode(inputPath);
-            var resizedBitmap = originalBitmap.Resize(
-                new SKImageInfo(targetSize, targetSize),
-                SKFilterQuality.Medium
-            );
-
-            var outputPath = $"output_skia_{Path.GetFileNameWithoutExtension(inputPath)}_{targetSize}.{format}";
-
-            using var image = SKImage.FromBitmap(resizedBitmap);
-            using var data = image.Encode(SKEncodedImageFormat.Jpeg, 75);
-            File.WriteAllBytes(outputPath, data.ToArray());
-
-            stopwatch.Stop();
-            var outputFileInfo = new FileInfo(outputPath);
-
-            return new CompressionResult
-            {
-                FileName = Path.GetFileName(inputPath),
-                LibraryName = "SkiaSharp",
-                TargetSize = targetSize,
-                Format = format,
-                CompressionTimeMs = stopwatch.ElapsedMilliseconds,
-                MemoryUsedBytes = GC.GetTotalMemory(true) - initialMemory,
-                InputFileSizeBytes = inputFileInfo.Length,
-                OutputFileSizeBytes = outputFileInfo.Length
-            };
-        });
+            FileName = Path.GetFileName(inputPath),
+            LibraryName = "SkiaSharp",
+            TargetSize = targetSize,
+            Format = format,
+            CompressionTimeMs = stopwatch.ElapsedMilliseconds,
+            MemoryUsedBytes = GC.GetTotalMemory(true) - initialMemory,
+            InputFileSizeBytes = inputFileInfo.Length,
+            OutputFileSizeBytes = outputFileInfo.Length
+        };
     }
 
     public void GenerateReport(List<CompressionResult> results, string outputPath)
@@ -178,7 +164,8 @@ public class ImageCompressor
         ));
 
         // Write to file
-        File.WriteAllLines(outputPath, lines);
+        var fileName = $"compression_report_{DateTime.Now:yyyy-MM-dd-HH-mm}.tsv";
+        File.WriteAllLines(Path.Combine(outputPath,fileName), lines);
         Console.WriteLine($"Report generated: {outputPath}");
     }
 }

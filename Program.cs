@@ -1,9 +1,9 @@
 ﻿using DotNETImageResizer;
 
 
-const string inputFolderPath = @"C:\Users\dev_v\OneDrive\Desktop\Learning\DotNETImageResizer";
-const string outputReportPath = @"C:\Users\dev_v\OneDrive\Desktop\Learning\DotNETImageResizer";
+const string inputFolderPath = @"D:\PIHR\Demo\DotNETImageResizers";
+const string outputReportPath = @"D:\PIHR\Demo\Output";
 
 var compressor = new ImageCompressor();
-var results = await compressor.RunBenchmarksAsync(inputFolderPath);
+var results =compressor.RunBenchmarksAsync(inputFolderPath);
 compressor.GenerateReport(results, outputReportPath);
