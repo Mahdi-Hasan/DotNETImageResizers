@@ -12,7 +12,7 @@ using System.Text;
 namespace DotNETImageResizer;
 public class ImageCompressor
 {
-    public readonly int Quality = 75;
+    public readonly int Quality = 50;
     public async Task<CompressionResult[]> RunBenchmarksAsync(string inputFolderPath, string outputFilesPath, int expectedSize)
     {
         // Get all supported image files
@@ -20,7 +20,7 @@ public class ImageCompressor
         var imageFiles = Directory.GetFiles(inputFolderPath)
             .Where(file => supportedExtensions.Contains(Path.GetExtension(file).ToLower()))
             .ToList();
-        var totalResults = 3 * imageFiles.Count + 1;
+        var totalResults = (3 * imageFiles.Count) + 1;
         CompressionResult[] results = new CompressionResult[totalResults];
 
         await Parallel.ForEachAsync(imageFiles, new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount }, async (inputFilePath, cancellationToken) =>
@@ -36,7 +36,11 @@ public class ImageCompressor
                     CompressWithSkiaSharp(inputFilePath, expectedSize, outputFormat, outputFilesPath)
                 };
 
-                results = await Task.WhenAll(compressionTasks);
+                var compressedResults = await Task.WhenAll(compressionTasks);
+                for (int i = 0; i < compressedResults.Length; i++)
+                {
+                    results[i] = compressedResults[i];
+                }
             }
             catch (Exception ex)
             {
@@ -132,10 +136,9 @@ public class ImageCompressor
         var inputFileInfo = new FileInfo(inputPath);
         SKEncodedImageFormat encodedFormat = format.ToLower() switch
         {
-            "jpg" or "jpeg" => SKEncodedImageFormat.Jpeg,
+            "jpg" or "jpeg" or "bmp" => SKEncodedImageFormat.Jpeg,
             "png" => SKEncodedImageFormat.Png,
             "webp" => SKEncodedImageFormat.Webp,
-            "bmp" => SKEncodedImageFormat.Bmp,
             _ => throw new ArgumentException($"Unsupported output file format Skia encode: {format}")
         };
         var outputPath = Path.Combine(outputFilesPath, $"{Path.GetFileNameWithoutExtension(inputPath)}_skia.{format}");
@@ -145,7 +148,7 @@ public class ImageCompressor
         {
             using (var encodedImage = SKImage.FromBitmap(originalBitmap))
             {
-                using (var encodedData = encodedImage.Encode())
+                using (var encodedData = encodedImage.Encode(encodedFormat,Quality))
                 {
                     imageData = encodedData.ToArray();
                 }

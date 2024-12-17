@@ -12,11 +12,10 @@ public class ReportGenerator
         };
 
         // Add data rows with sizes in KB
-        lines.AddRange(results.Select(r =>
-            $"{r.FileName}\t{r.LibraryName}\t{r.Format}\t{r.CompressionTimeMs}\t{r.MemoryUsedBytes / 1024.0:F2}\t{r.InputFileSizeBytes / 1024.0:F2}\t{r.OutputFileSizeBytes / 1024.0:F2}"
-        ));
-
-
+        foreach (var result in results)
+        {
+            lines.Add($"{result.FileName}\t{result.LibraryName}\t{result.Format}\t{result.CompressionTimeMs}\t{result.MemoryUsedBytes / 1024.0:F2}\t{result.InputFileSizeBytes / 1024.0:F2}\t{result.OutputFileSizeBytes / 1024.0:F2}");
+        }
         // Write to file
         var fileName = $"compression_report_{DateTime.Now:dd-MMM_HH-mm}.tsv";
         File.WriteAllLines(Path.Combine(outputPath, fileName), lines);
