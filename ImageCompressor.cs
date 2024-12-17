@@ -7,23 +7,21 @@ using SixLabors.ImageSharp.Processing;
 using SixLabors.ImageSharp.Formats.Png;
 using SixLabors.ImageSharp.Formats.Webp;
 using SixLabors.ImageSharp.Formats;
-using System.Drawing;
 using SixLabors.ImageSharp.Formats.Bmp;
-using System.Collections.Concurrent;
 
 namespace DotNETImageResizer;
 
 public class ImageCompressor
 {
-    public async Task<CompressionResult[]> RunBenchmarksAsync(string inputFolderPath, string outputFilesPath)
+    public async Task<CompressionResult[]> RunBenchmarksAsync(string inputFolderPath, string outputFilesPath, int expectedSize)
     {
         // Get all supported image files
         var supportedExtensions = new[] { ".jpg", ".jpeg", ".png", ".bmp", ".webp" };
         var imageFiles = Directory.GetFiles(inputFolderPath)
             .Where(file => supportedExtensions.Contains(Path.GetExtension(file).ToLower()))
             .ToList();
-        const int expectedSize = 512;
-        CompressionResult[] results;
+        var totalResults = 3 * imageFiles.Count + 1;
+        CompressionResult[] results = new CompressionResult[totalResults];
 
         await Parallel.ForEachAsync(imageFiles, new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount }, async (inputFilePath, cancellationToken) =>
         {
@@ -31,7 +29,6 @@ public class ImageCompressor
             {
                 string outputFormat = Path.GetExtension(inputFilePath).ToLower().TrimStart('.');
 
-                // Define compression tasks
                 var compressionTasks = new[]
                 {
                     CompressWithImageSharp(inputFilePath, expectedSize, outputFormat, outputFilesPath),
@@ -51,7 +48,7 @@ public class ImageCompressor
         return results;
     }
 
-    private async Task<CompressionResult> CompressWithImageSharp(string inputPath, int targetSize, string format ,string outputFilesPath)
+    private async Task<CompressionResult> CompressWithImageSharp(string inputPath, int targetSize, string format, string outputFilesPath)
     {
         var stopwatch = Stopwatch.StartNew();
         var initialMemory = GC.GetTotalMemory(true);
@@ -66,7 +63,7 @@ public class ImageCompressor
             Mode = ResizeMode.Max
         }));
 
-        var outputPath = $"{outputFilesPath}_output_imagesharp_{Path.GetFileNameWithoutExtension(inputPath)}.{format}";
+        var outputPath = $"{outputFilesPath}{Path.GetFileNameWithoutExtension(inputPath)}_ImageSharp.{format}";
 
         // Define supported encoders based on the format
         IImageEncoder encoder = format.ToLower() switch
@@ -108,7 +105,7 @@ public class ImageCompressor
 
         // Resize
         image.Resize(new Percentage(targetSize));
-        var outputPath = $"{outputFilesPath}_output_magicknet_{Path.GetFileNameWithoutExtension(inputPath)}.{format}";
+        var outputPath = $"{outputFilesPath}{Path.GetFileNameWithoutExtension(inputPath)}_Magicknet.{format}";
         image.Quality = 75;
         await image.WriteAsync(outputPath);
 
@@ -141,7 +138,7 @@ public class ImageCompressor
             new SKSamplingOptions(SKFilterMode.Nearest)
         );
 
-        var outputPath = $"{outputFilesPath}_output_skia_{Path.GetFileNameWithoutExtension(inputPath)}.{format}";
+        var outputPath = $"{outputFilesPath}{Path.GetFileNameWithoutExtension(inputPath)}_Skia.{format}";
 
         using var image = SKImage.FromBitmap(resizedBitmap);
         using var data = image.Encode(SKEncodedImageFormat.Jpeg, 75);
