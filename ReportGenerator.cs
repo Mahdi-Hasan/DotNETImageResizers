@@ -2,7 +2,7 @@
 
 public class ReportGenerator
 {
-    public void GenerateReport(List<CompressionResult> results, string outputPath)
+    public void GenerateReport(CompressionResult[] results, string outputPath)
     {
         // Generate TSV file
         var lines = new List<string>
@@ -18,7 +18,7 @@ public class ReportGenerator
 
 
         // Write to file
-        var fileName = $"compression_report_{DateTime.Now:dd-MMM_HH-mm-G}.tsv";
+        var fileName = $"compression_report_{DateTime.Now:dd-MMM_HH-mm}.tsv";
         File.WriteAllLines(Path.Combine(outputPath, fileName), lines);
         Console.WriteLine($"Report generated: {outputPath}");
     }

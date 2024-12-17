@@ -9,34 +9,49 @@ using SixLabors.ImageSharp.Formats.Webp;
 using SixLabors.ImageSharp.Formats;
 using System.Drawing;
 using SixLabors.ImageSharp.Formats.Bmp;
+using System.Collections.Concurrent;
 
 namespace DotNETImageResizer;
 
-public partial class ImageCompressor
+public class ImageCompressor
 {
-    public List<CompressionResult> RunBenchmarksAsync(string inputFolderPath)
+    public async Task<CompressionResult[]> RunBenchmarksAsync(string inputFolderPath, string outputFilesPath)
     {
-        var results = new List<CompressionResult>();
-
         // Get all supported image files
         var supportedExtensions = new[] { ".jpg", ".jpeg", ".png", ".bmp", ".webp" };
         var imageFiles = Directory.GetFiles(inputFolderPath)
             .Where(file => supportedExtensions.Contains(Path.GetExtension(file).ToLower()))
             .ToList();
         const int expectedSize = 512;
-        foreach (var inputFilePath in imageFiles)
+        CompressionResult[] results;
+
+        await Parallel.ForEachAsync(imageFiles, new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount }, async (inputFilePath, cancellationToken) =>
         {
-            string inputExtension = Path.GetExtension(inputFilePath).ToLower();
-            string outputFormat = inputExtension.TrimStart('.');
-            results.Add(CompressWithImageSharp(inputFilePath, expectedSize, outputFormat));
-            results.Add(CompressWithMagickNet(inputFilePath, expectedSize, outputFormat));
-            results.Add(CompressWithSkiaSharp(inputFilePath, expectedSize, outputFormat));
-        }
+            try
+            {
+                string outputFormat = Path.GetExtension(inputFilePath).ToLower().TrimStart('.');
+
+                // Define compression tasks
+                var compressionTasks = new[]
+                {
+                    CompressWithImageSharp(inputFilePath, expectedSize, outputFormat, outputFilesPath),
+                    CompressWithMagickNet(inputFilePath, expectedSize, outputFormat, outputFilesPath),
+                    CompressWithSkiaSharp(inputFilePath, expectedSize, outputFormat, outputFilesPath)
+                };
+
+                results = await Task.WhenAll(compressionTasks);
+            }
+            catch (Exception ex)
+            {
+                // Log the error or handle it appropriately
+                Console.WriteLine($"Error processing {inputFilePath}: {ex.Message}");
+            }
+        });
 
         return results;
     }
 
-    private CompressionResult CompressWithImageSharp(string inputPath, int targetSize, string format)
+    private async Task<CompressionResult> CompressWithImageSharp(string inputPath, int targetSize, string format ,string outputFilesPath)
     {
         var stopwatch = Stopwatch.StartNew();
         var initialMemory = GC.GetTotalMemory(true);
@@ -51,8 +66,7 @@ public partial class ImageCompressor
             Mode = ResizeMode.Max
         }));
 
-        // Compress with quality control
-        var outputPath = $"output_imagesharp_{Path.GetFileNameWithoutExtension(inputPath)}_{targetSize}.{format}";
+        var outputPath = $"{outputFilesPath}_output_imagesharp_{Path.GetFileNameWithoutExtension(inputPath)}.{format}";
 
         // Define supported encoders based on the format
         IImageEncoder encoder = format.ToLower() switch
@@ -65,7 +79,7 @@ public partial class ImageCompressor
         };
 
         // Save with appropriate encoder
-        image.Save(outputPath, encoder);
+        await image.SaveAsync(outputPath, encoder);
 
         stopwatch.Stop();
         var outputFileInfo = new FileInfo(outputPath);
@@ -83,7 +97,7 @@ public partial class ImageCompressor
         };
     }
 
-    private CompressionResult CompressWithMagickNet(string inputPath, int targetSize, string format)
+    private async Task<CompressionResult> CompressWithMagickNet(string inputPath, int targetSize, string format, string outputFilesPath)
     {
 
         var stopwatch = Stopwatch.StartNew();
@@ -94,11 +108,9 @@ public partial class ImageCompressor
 
         // Resize
         image.Resize(new Percentage(targetSize));
-
-        // Compress
-        var outputPath = $"output_magicknet_{Path.GetFileNameWithoutExtension(inputPath)}_{targetSize}.{format}";
+        var outputPath = $"{outputFilesPath}_output_magicknet_{Path.GetFileNameWithoutExtension(inputPath)}.{format}";
         image.Quality = 75;
-        image.Write(outputPath);
+        await image.WriteAsync(outputPath);
 
         stopwatch.Stop();
         var outputFileInfo = new FileInfo(outputPath);
@@ -116,7 +128,7 @@ public partial class ImageCompressor
         };
     }
 
-    private CompressionResult CompressWithSkiaSharp(string inputPath, int targetSize, string format)
+    private async Task<CompressionResult> CompressWithSkiaSharp(string inputPath, int targetSize, string format, string outputFilesPath)
     {
 
         var stopwatch = Stopwatch.StartNew();
@@ -129,12 +141,11 @@ public partial class ImageCompressor
             new SKSamplingOptions(SKFilterMode.Nearest)
         );
 
-
-        var outputPath = $"output_skia_{Path.GetFileNameWithoutExtension(inputPath)}_{targetSize}.{format}";
+        var outputPath = $"{outputFilesPath}_output_skia_{Path.GetFileNameWithoutExtension(inputPath)}.{format}";
 
         using var image = SKImage.FromBitmap(resizedBitmap);
         using var data = image.Encode(SKEncodedImageFormat.Jpeg, 75);
-        File.WriteAllBytes(outputPath, data.ToArray());
+        await File.WriteAllBytesAsync(outputPath, data.ToArray());
 
         stopwatch.Stop();
         var outputFileInfo = new FileInfo(outputPath);
