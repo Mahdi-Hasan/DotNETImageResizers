@@ -8,6 +8,7 @@ using SixLabors.ImageSharp.Formats.Png;
 using SixLabors.ImageSharp.Formats.Webp;
 using SixLabors.ImageSharp.Formats;
 using System.Drawing;
+using SixLabors.ImageSharp.Formats.Bmp;
 
 namespace DotNETImageResizer;
 
@@ -23,13 +24,14 @@ public class ImageCompressor
         var imageFiles = Directory.GetFiles(inputFolderPath)
             .Where(file => supportedExtensions.Contains(Path.GetExtension(file).ToLower()))
             .ToList();
-        const int size = 512;
-        const string format = "jpg";
-        foreach (var inputPath in imageFiles)
+        const int expectedSize = 512;
+        foreach (var inputFilePath in imageFiles)
         {
-            results.Add(CompressWithImageSharp(inputPath, size, format));
-            results.Add(CompressWithMagickNet(inputPath, size, format));
-            results.Add(CompressWithSkiaSharp(inputPath, size, format));
+            string inputExtension = Path.GetExtension(inputFilePath).ToLower();
+            string outputFormat = inputExtension.TrimStart('.');
+            results.Add(CompressWithImageSharp(inputFilePath, expectedSize, outputFormat));
+            results.Add(CompressWithMagickNet(inputFilePath, expectedSize, outputFormat));
+            results.Add(CompressWithSkiaSharp(inputFilePath, expectedSize, outputFormat));
         }
 
         return results;
@@ -41,7 +43,7 @@ public class ImageCompressor
         var initialMemory = GC.GetTotalMemory(true);
         var inputFileInfo = new FileInfo(inputPath);
 
-        using var image = SixLabors.ImageSharp.Image.Load(inputPath);
+        using var image = Image.Load(inputPath);
 
         // Resize
         image.Mutate(x => x.Resize(new ResizeOptions
@@ -53,11 +55,12 @@ public class ImageCompressor
         // Compress with quality control
         var outputPath = $"output_imagesharp_{Path.GetFileNameWithoutExtension(inputPath)}_{targetSize}.{format}";
 
-        // Determine encoder based on format
-        IImageEncoder encoder = format switch
+        // Define supported encoders based on the format
+        IImageEncoder encoder = format.ToLower() switch
         {
-            "jpg" => new JpegEncoder { Quality = 75 },
+            "jpg" or "jpeg" => new JpegEncoder { Quality = 75 }, // JPEG Encoder
             "png" => new PngEncoder { CompressionLevel = PngCompressionLevel.Level5 },
+            "bmp" => new BmpEncoder(), // BMP Encoder (default settings)
             "webp" => new WebpEncoder { Quality = 75 },
             _ => throw new ArgumentException($"Unsupported format: {format}")
         };
@@ -124,8 +127,9 @@ public class ImageCompressor
         using var originalBitmap = SKBitmap.Decode(inputPath);
         var resizedBitmap = originalBitmap.Resize(
             new SKImageInfo(targetSize, targetSize),
-            SKFilterQuality.Medium
+            new SKSamplingOptions(SKFilterMode.Nearest)
         );
+
 
         var outputPath = $"output_skia_{Path.GetFileNameWithoutExtension(inputPath)}_{targetSize}.{format}";
 
